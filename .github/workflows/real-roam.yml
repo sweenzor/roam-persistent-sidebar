@@ -96,7 +96,7 @@ jobs:
 
       - name: Summary
         if: always() && steps.creds.outputs.ok == 'true'
-        run: '[ -f "$OUT/RESULTS.md" ] && cat "$OUT/RESULTS.md" >> "$GITHUB_STEP_SUMMARY" || true'
+        run: '[ -f "$OUT/RESULTS.md" ] && cat "$OUT/RESULTS.md" | tee -a "$GITHUB_STEP_SUMMARY" || true'
 
       - uses: actions/upload-artifact@v4
         if: always() && steps.creds.outputs.ok == 'true'

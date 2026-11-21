@@ -209,13 +209,20 @@ async function setLogSwitch(on) {
     const tab = [...document.querySelectorAll('.bp3-dialog *')].find((e) => e.children.length === 0 && /^Persistent Sidebar/.test(e.textContent.trim()));
     tab?.click(); return !!tab;
   }), 15000);
-  const input = await waitFor('the Sidebar log switch', () => evalIn(() => !!document.querySelector('.bp3-dialog .bp3-switch input')), 10000);
-  if (input && (await evalIn(() => document.querySelector('.bp3-dialog .bp3-switch input').checked)) !== on) {
-    await roam.page.locator('.bp3-dialog .bp3-switch').first().click();
-  }
+  // The dialog keeps other tabs' switches around, so find ours by its row: the one named Sidebar log.
+  const state = () => evalIn(() => {
+    const name = [...document.querySelectorAll('.bp3-dialog *')].find((e) => e.children.length === 0 && e.textContent.trim() === 'Sidebar log' && e.offsetParent);
+    let row = name;
+    while (row && !row.querySelector('.bp3-switch input')) row = row.parentElement;
+    const input = row?.closest('.bp3-dialog') ? row.querySelector('.bp3-switch input') : null;
+    if (!input) return null;
+    window.__psSwitch = input;
+    return { checked: input.checked };
+  });
+  const found = await waitFor('the Sidebar log switch', state, 10000);
+  if (found.checked !== on) await evalIn(() => window.__psSwitch.click());
   await sleep(800);
-  const now = await evalIn(() => document.querySelector('.bp3-dialog .bp3-switch input').checked);
-  if (now !== on) throw new Error(`could not turn the Sidebar log switch ${on ? 'on' : 'off'}`);
+  if ((await state())?.checked !== on) throw new Error(`could not turn the Sidebar log switch ${on ? 'on' : 'off'}`);
   if (on) await shot('settings-sidebar-log-on');
   await roam.page.keyboard.press('Escape'); await sleep(500);
 }
