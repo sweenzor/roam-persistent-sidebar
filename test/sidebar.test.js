@@ -1,0 +1,94 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readWindows, restore, windowKey } from '../src/sidebar.js';
+
+// A stand-in for roamAlphaAPI that behaves like Roam's: addWindow puts the window at the top, the
+// sidebar opens when a window is added, and getWindows reports page windows by page-uid.
+function fakeApi(pages = ['p1', 'p2', 'p3', 'b1']) {
+  let wins = [], open = false;
+  const key = (w) => w.type === 'search-query' ? `search-query:${w['search-query-str']}` : `${w.type}:${w['block-uid']}`;
+  const find = (w) => wins.find((x) => key(x) === key(w));
+  const calls = [];
+  const sb = {
+    getWindows: () => wins.map((w, order) => {
+      const o = { type: w.type, order, 'pinned?': !!w.pinned, 'collapsed?': !!w.collapsed };
+      if (w.type === 'search-query') o['search-query-str'] = w['search-query-str'];
+      else if (w.type === 'block') o['block-uid'] = w['block-uid'];
+      else o['page-uid'] = w['block-uid'];
+      return o;
+    }),
+    addWindow: async ({ window: w }) => { calls.push(['add', key(w)]); if (!find(w)) wins.unshift({ ...w }); open = true; },
+    removeWindow: async ({ window: w }) => { calls.push(['remove', key(w)]); wins = wins.filter((x) => key(x) !== key(w)); },
+    collapseWindow: async ({ window: w }) => { find(w).collapsed = true; },
+    expandWindow: async ({ window: w }) => { find(w).collapsed = false; },
+    pinWindow: async ({ window: w }) => { find(w).pinned = true; },
+    open: async () => { open = true; },
+    close: async () => { open = false; },
+  };
+  return { api: { ui: { rightSidebar: sb } }, exists: (u) => pages.includes(u), isOpen: () => open, calls, sb };
+}
+
+const saved = {
+  open: true,
+  windows: [
+    { type: 'outline', uid: 'p1', collapsed: false, pinned: false },
+    { type: 'block', uid: 'b1', collapsed: true, pinned: false },
+    { type: 'search-query', query: 'todo', collapsed: false, pinned: true },
+    { type: 'mentions', uid: 'p2', collapsed: false, pinned: false },
+  ],
+};
+
+test('restores every window in order, with collapsed and pinned state, and opens the sidebar', async () => {
+  const f = fakeApi();
+  await restore(f.api, saved, { exists: f.exists });
+  assert.deepEqual(readWindows(f.sb), saved.windows);
+  assert.equal(f.isOpen(), true);
+});
+
+test('read then restore round-trips', async () => {
+  const a = fakeApi();
+  await restore(a.api, saved, { exists: a.exists });
+  const snap = { open: true, windows: readWindows(a.sb) };
+  const b = fakeApi();
+  await restore(b.api, snap, { exists: b.exists });
+  assert.deepEqual(readWindows(b.sb), readWindows(a.sb));
+});
+
+test('keeps the sidebar closed when it was closed', async () => {
+  const f = fakeApi();
+  await restore(f.api, { ...saved, open: false }, { exists: f.exists });
+  assert.equal(readWindows(f.sb).length, 4);
+  assert.equal(f.isOpen(), false);
+});
+
+test('skips windows whose page or block was deleted', async () => {
+  const f = fakeApi(['p1']);
+  const n = await restore(f.api, saved, { exists: f.exists });
+  assert.equal(n, 2);
+  assert.deepEqual(readWindows(f.sb).map(windowKey), ['outline:p1', 'search-query:todo']);
+});
+
+test('windows Roam already put back (pinned ones) are not doubled and end up in saved order', async () => {
+  const f = fakeApi();
+  await f.sb.addWindow({ window: { type: 'mentions', 'block-uid': 'p2' } });
+  await f.sb.pinWindow({ window: { type: 'mentions', 'block-uid': 'p2' } });
+  await f.sb.addWindow({ window: { type: 'outline', 'block-uid': 'p3' } }); // open now, not saved
+  await restore(f.api, saved, { exists: f.exists });
+  assert.deepEqual(readWindows(f.sb).map(windowKey), [...saved.windows.map(windowKey), 'outline:p3']);
+  assert.equal(readWindows(f.sb)[3].pinned, true);
+});
+
+test('does nothing when the sidebar already matches', async () => {
+  const f = fakeApi();
+  await restore(f.api, saved, { exists: f.exists });
+  f.calls.length = 0;
+  await restore(f.api, saved, { exists: f.exists });
+  assert.deepEqual(f.calls, []);
+});
+
+test('an empty save leaves the sidebar alone', async () => {
+  const f = fakeApi();
+  await f.sb.addWindow({ window: { type: 'outline', 'block-uid': 'p3' } });
+  await restore(f.api, { open: true, windows: [] }, { exists: f.exists });
+  assert.deepEqual(readWindows(f.sb).map(windowKey), ['outline:p3']);
+});
