@@ -16,7 +16,7 @@ async function start(extensionAPI) {
   const graph = api.graph ?? {};
   const store = createStore(`${graph.type ?? 'hosted'}:${graph.name ?? location.hash.split('/')[2] ?? ''}`);
   let stopped = false, timer = null, last = null, observer = null;
-  const log = createLog(api);
+  const log = createLog(api, () => extensionAPI?.settings?.get('log-page'));
   const logging = () => !!extensionAPI?.settings?.get('log');
   const titleOf = (uid) => api.data.pull('[:node/title]', [':block/uid', uid])?.[':node/title'] ?? null;
 
@@ -67,12 +67,20 @@ async function start(extensionAPI) {
 function settingsPanel(extensionAPI) {
   extensionAPI?.settings?.panel?.create({
     tabTitle: 'Persistent Sidebar',
-    settings: [{
-      id: 'log',
-      name: 'Sidebar log',
-      description: `Add every window opened in or closed from the right sidebar to the page ${LOG_PAGE}, with the time.`,
-      action: { type: 'switch' },
-    }],
+    settings: [
+      {
+        id: 'log',
+        name: 'Sidebar log',
+        description: 'Add every window opened in or closed from the right sidebar to the sidebar log page, with the time.',
+        action: { type: 'switch' },
+      },
+      {
+        id: 'log-page',
+        name: 'Sidebar log page',
+        description: 'The page the sidebar log is added to.',
+        action: { type: 'input', placeholder: LOG_PAGE },
+      },
+    ],
   });
 }
 

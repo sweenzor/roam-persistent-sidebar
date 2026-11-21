@@ -1,6 +1,6 @@
 // The optional sidebar log: every window opened in or closed from the right sidebar, written to a Roam
-// page as it happens. One block per day, then one block per change with the time, worded like the
-// window headers in Roam's sidebar.
+// page as it happens. One block per day, linked to that day's daily note, then one block per change with
+// the time, worded like the window headers in Roam's sidebar.
 import { windowKey } from './sidebar.js';
 
 export const LOG_PAGE = 'Sidebar Log';
@@ -26,17 +26,19 @@ export function changes(before, after, titleOf) {
 
 const pad = (n) => String(n).padStart(2, '0');
 
-/** Appends lines to the log page, under today's block. Writes run one after another. */
-export function createLog(api) {
+/** Appends lines to the log page, under today's block. Writes run one after another. `pageTitle`
+ *  gives the page to write to at the time of each write, so a change in settings takes effect at once. */
+export function createLog(api, pageTitle = () => LOG_PAGE) {
   let queue = Promise.resolve();
   const q = (query, ...args) => api.data.q(query, ...args);
   async function write(lines, when) {
-    let page = q('[:find ?u . :in $ ?t :where [?p :node/title ?t] [?p :block/uid ?u]]', LOG_PAGE);
+    const title = (pageTitle() ?? '').trim() || LOG_PAGE;
+    let page = q('[:find ?u . :in $ ?t :where [?p :node/title ?t] [?p :block/uid ?u]]', title);
     if (!page) {
       page = api.util.generateUID();
-      await api.data.page.create({ page: { title: LOG_PAGE, uid: page } });
+      await api.data.page.create({ page: { title, uid: page } });
     }
-    const day = api.util.dateToPageTitle(when);
+    const day = `[[${api.util.dateToPageTitle(when)}]]`;
     const kids = q('[:find ?u ?s ?o :in $ ?p :where [?pp :block/uid ?p] [?pp :block/children ?b] [?b :block/uid ?u] [?b :block/string ?s] [?b :block/order ?o]]', page)
       .sort((a, b) => a[2] - b[2]);
     let dayUid = kids.length && kids[kids.length - 1][1] === day ? kids[kids.length - 1][0] : null;

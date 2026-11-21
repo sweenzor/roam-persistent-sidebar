@@ -40,21 +40,32 @@ function fakeGraph() {
       },
     },
   };
-  const outline = () => {
-    const page = [...blocks.values()].find((b) => b.title === LOG_PAGE);
+  const outline = (title = LOG_PAGE) => {
+    const page = [...blocks.values()].find((b) => b.title === title);
     return page?.children.map((d) => [blocks.get(d).string, blocks.get(d).children.map((c) => blocks.get(c).string)]);
   };
   return { api, outline };
 }
 
-test('writes under one block per day, creating the page the first time', async () => {
+test('writes under one block per day, linked to the daily note, creating the page the first time', async () => {
   const g = fakeGraph();
   const log = createLog(g.api);
   log.add(['Opened [[Alpha]]'], new Date(2026, 10, 21, 9, 5));
   log.add(['Closed [[Alpha]]', 'Opened ((b1))'], new Date(2026, 10, 21, 17, 30));
   await log.add(['Opened Search: todo'], new Date(2026, 10, 22, 8, 0));
   assert.deepEqual(g.outline(), [
-    ['November 21th, 2026', ['09:05 Opened [[Alpha]]', '17:30 Closed [[Alpha]]', '17:30 Opened ((b1))']],
-    ['November 22th, 2026', ['08:00 Opened Search: todo']],
+    ['[[November 21th, 2026]]', ['09:05 Opened [[Alpha]]', '17:30 Closed [[Alpha]]', '17:30 Opened ((b1))']],
+    ['[[November 22th, 2026]]', ['08:00 Opened Search: todo']],
   ]);
+});
+
+test('writes to the page named in settings, and to Sidebar Log when the name is blank', async () => {
+  const g = fakeGraph();
+  let name = '  Reading trail ';
+  const log = createLog(g.api, () => name);
+  await log.add(['Opened [[Alpha]]'], new Date(2026, 10, 21, 9, 5));
+  name = '';
+  await log.add(['Closed [[Alpha]]'], new Date(2026, 10, 21, 9, 6));
+  assert.deepEqual(g.outline('Reading trail'), [['[[November 21th, 2026]]', ['09:05 Opened [[Alpha]]']]]);
+  assert.deepEqual(g.outline(), [['[[November 21th, 2026]]', ['09:06 Closed [[Alpha]]']]]);
 });

@@ -110,6 +110,7 @@ async function main() {
   check('Extension loads and saves the sidebar', true);
 
   // 1. Fill the sidebar: one window of every kind, one collapsed, one pinned.
+  logStart = (await logLines()).length;
   await clearSidebar();
   const t = await targets();
   log('targets', JSON.stringify(t));
@@ -171,37 +172,60 @@ async function main() {
   // 5. The sidebar log (signed in only: the help graph can't be written to). Switched on in the
   // settings tab, then off again, because extension settings are kept in the graph.
   if (!PUBLIC) {
-    await setLogSwitch(true);
-    const before = await logLines();
-    await sb(`await sb.addWindow({ window: w('outline:' + arg.b) }); await new Promise((r) => setTimeout(r, 1500));
+    await deletePage(CUSTOM_LOG_PAGE); // left by a run that stopped early
+    const was = await logSettings({});
+    check('The Sidebar log switch is off until it is turned on, and nothing was logged', !was.on && (await logLines()).length === logStart, `${(await logLines()).length - logStart} lines`);
+    const openAndClose = () => sb(`await sb.addWindow({ window: w('outline:' + arg.b) }); await new Promise((r) => setTimeout(r, 1500));
       await sb.removeWindow({ window: w('outline:' + arg.b) });`, t);
     const want = [`Opened [[${OTHER_PAGE}]]`, `Closed [[${OTHER_PAGE}]]`];
-    const got = await waitFor('the log entries', async () => {
-      const lines = (await logLines()).slice(before.length).map((l) => l.replace(/^\d\d:\d\d /, ''));
+    const entries = (title, from) => waitFor('the log entries', async () => {
+      const lines = (await logLines(title)).slice(from).map((l) => l.replace(/^\d\d:\d\d /, ''));
       return want.every((x) => lines.includes(x)) && lines;
     }, 15000).catch(() => null);
-    check('With the Sidebar log switch on, opening and closing a window adds both to the page Sidebar Log', !!got, got?.join(' / ') ?? 'no entries');
-    await evalIn(() => window.roamAlphaAPI.ui.mainWindow.openPage({ page: { title: 'Sidebar Log' } }));
+
+    await logSettings({ on: true });
+    await openAndClose();
+    const got = await entries(LOG_PAGE, logStart);
+    check('With the switch on, opening and closing a window adds both to the page Sidebar Log', !!got, got?.join(' / ') ?? 'no entries');
+    const today = await evalIn(() => `[[${window.roamAlphaAPI.util.dateToPageTitle(new Date())}]]`);
+    const day = await logDay(LOG_PAGE);
+    check('The day in the log links to the daily note page', day === today, day ?? 'no day block');
+    await evalIn((title) => window.roamAlphaAPI.ui.mainWindow.openPage({ page: { title } }), LOG_PAGE);
     await sleep(1500);
     await shot('sidebar-log-page');
-    await setLogSwitch(false);
+
+    await logSettings({ page: CUSTOM_LOG_PAGE });
+    const mid = (await logLines()).length;
+    await openAndClose();
+    const got2 = await entries(CUSTOM_LOG_PAGE, 0);
+    check('With another page named in settings, the log goes to that page instead', !!got2 && (await logLines()).length === mid, got2?.join(' / ') ?? 'no entries');
+
+    await logSettings({ on: false, page: '' });
     await sb(`await sb.addWindow({ window: w('outline:' + arg.b) }); await new Promise((r) => setTimeout(r, 1500));`, t);
-    const off = (await logLines()).length;
     await sleep(1500);
-    check('With the switch off, nothing more is logged', off === (await logLines()).length && off === before.length + 2, `${off - before.length} lines`);
+    check('With the switch off again, nothing more is logged', (await logLines()).length === mid && (await logLines(CUSTOM_LOG_PAGE)).length === 2, `${(await logLines()).length - mid} lines`);
     await clearSidebar();
   }
 }
 
-/** Every entry on the Sidebar Log page, oldest first. */
-const logLines = () => evalIn(() => {
-  const api = window.roamAlphaAPI;
-  const page = api.data.pull('[{:block/children [:block/order {:block/children [:block/string :block/order]}]}]', [':node/title', 'Sidebar Log']);
+const LOG_PAGE = 'Sidebar Log', CUSTOM_LOG_PAGE = 'Persistent Sidebar CI log';
+let logStart = 0;
+const logTree = (title) => evalIn((title) => {
+  const page = window.roamAlphaAPI.data.pull('[{:block/children [:block/string :block/order {:block/children [:block/string :block/order]}]}]', [':node/title', title]);
   const byOrder = (a, b) => a[':block/order'] - b[':block/order'];
-  return (page?.[':block/children'] ?? []).sort(byOrder).flatMap((d) => (d[':block/children'] ?? []).sort(byOrder).map((c) => c[':block/string']));
-});
-/** Turns the Sidebar log switch in the Persistent Sidebar settings tab on or off. */
-async function setLogSwitch(on) {
+  return (page?.[':block/children'] ?? []).sort(byOrder).map((d) => [d[':block/string'], (d[':block/children'] ?? []).sort(byOrder).map((c) => c[':block/string'])]);
+}, title);
+const deletePage = (title) => evalIn(async (title) => {
+  const uid = window.roamAlphaAPI.data.q('[:find ?u . :in $ ?t :where [?p :node/title ?t] [?p :block/uid ?u]]', title);
+  if (uid) await window.roamAlphaAPI.data.page.delete({ page: { uid } });
+}, title);
+/** Every entry on a log page, oldest first. */
+const logLines = async (title = LOG_PAGE) => (await logTree(title)).flatMap((d) => d[1]);
+/** The last day block on a log page. */
+const logDay = async (title) => (await logTree(title)).at(-1)?.[0] ?? null;
+/** Opens the Persistent Sidebar settings tab, sets the Sidebar log switch (`on`) and the Sidebar log
+ *  page field (`page`) when given, and returns how the switch was before. */
+async function logSettings({ on, page }) {
   await evalIn(() => document.querySelector('.rm-topbar .bp3-icon-more')?.click());
   await waitFor('the More menu', () => evalIn(() => !!document.querySelector('.bp3-menu-item')), 5000);
   await evalIn(() => [...document.querySelectorAll('.bp3-menu-item')].find((e) => /^Settings/.test(e.innerText.trim()))?.click());
@@ -209,28 +233,41 @@ async function setLogSwitch(on) {
     const tab = [...document.querySelectorAll('.bp3-dialog *')].find((e) => e.children.length === 0 && /^Persistent Sidebar/.test(e.textContent.trim()));
     tab?.click(); return !!tab;
   }), 15000);
-  // The dialog keeps other tabs' switches around, so find ours by its row: the one named Sidebar log.
-  const state = () => evalIn(() => {
-    const name = [...document.querySelectorAll('.bp3-dialog *')].find((e) => e.children.length === 0 && e.textContent.trim() === 'Sidebar log' && e.offsetParent);
-    let row = name;
-    while (row && !row.querySelector('.bp3-switch input')) row = row.parentElement;
-    const input = row?.closest('.bp3-dialog') ? row.querySelector('.bp3-switch input') : null;
-    if (!input) return null;
-    window.__psSwitch = input;
-    return { checked: input.checked };
-  });
-  const found = await waitFor('the Sidebar log switch', state, 10000);
-  if (found.checked !== on) await evalIn(() => window.__psSwitch.click());
-  await sleep(800);
-  if ((await state())?.checked !== on) throw new Error(`could not turn the Sidebar log switch ${on ? 'on' : 'off'}`);
-  if (on) await shot('settings-sidebar-log-on');
+  // The dialog keeps other tabs' controls around, so find ours by the name on their rows.
+  const control = (name, selector) => evalIn(([name, selector]) => {
+    const label = [...document.querySelectorAll('.bp3-dialog *')].find((e) => e.children.length === 0 && e.textContent.trim() === name && e.offsetParent);
+    let row = label;
+    while (row && !row.querySelector(selector)) row = row.parentElement;
+    const el = row?.closest('.bp3-dialog') ? row.querySelector(selector) : null;
+    if (!el) return null;
+    document.querySelectorAll('[data-ps-control]').forEach((e) => e.removeAttribute('data-ps-control'));
+    el.setAttribute('data-ps-control', '');
+    return { checked: !!el.checked, value: el.value ?? '' };
+  }, [name, selector]);
+  const sw = () => control('Sidebar log', '.bp3-switch input');
+  const was = await waitFor('the Sidebar log switch', sw, 10000);
+  if (on !== undefined && was.checked !== on) {
+    await evalIn(() => document.querySelector('[data-ps-control]').click());
+    await sleep(800);
+    if ((await sw())?.checked !== on) throw new Error(`could not turn the Sidebar log switch ${on ? 'on' : 'off'}`);
+  }
+  if (page !== undefined) {
+    await waitFor('the Sidebar log page field', () => control('Sidebar log page', 'input:not([type="checkbox"])'), 10000);
+    await roam.page.locator('[data-ps-control]').fill(page);
+    await roam.page.keyboard.press('Tab');
+    await sleep(1000);
+  }
+  if (on || page) await shot(`settings-${page ? 'log-page-named' : 'sidebar-log-on'}`);
   await roam.page.keyboard.press('Escape'); await sleep(500);
+  return { on: was.checked };
 }
 
 let failure = '';
 try { await main(); } catch (e) { failure = e.message.split('\n')[0]; log('ERROR', e.stack ?? e.message); await shot('error'); }
 try { if (roam.page) await clearSidebar(); } catch { /* best effort */ }
-try { if (roam.page && !PUBLIC) await setLogSwitch(false); } catch { /* best effort */ }
+try {
+  if (roam.page && !PUBLIC) { await logSettings({ on: false, page: '' }); await deletePage(CUSTOM_LOG_PAGE); }
+} catch { /* best effort */ }
 await quitRoam('SIGTERM').catch(() => {});
 stopServing();
 const pass = writeResults(failure);

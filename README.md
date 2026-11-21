@@ -15,10 +15,12 @@ Turn the extension off to go back to Roam's normal sidebar.
 ## Sidebar log
 
 Turn on **Sidebar log** in the Persistent Sidebar settings tab to keep a record of everything you open in
-and close from the right sidebar. Each one is added to the page **Sidebar Log** with the time, under a block
-for the day, like `14:05 Opened [[Project X]]` or `14:20 Closed References to: [[Project X]]`. Because the
-entries link to the pages and blocks, those pages list the log in their Linked References. It's off unless
-you turn it on.
+and close from the right sidebar. Each one is added to the page **Sidebar Log** with the time, like
+`14:05 Opened [[Project X]]` or `14:20 Closed References to: [[Project X]]`, under a block for the day that
+links to that day's daily note. To use another page, type its name in **Sidebar log page**.
+
+The entries link to the pages and blocks, and each day links to its daily note, so those pages list the log
+in their Linked References. The log is off unless you turn it on.
 
 ## Limitations
 
