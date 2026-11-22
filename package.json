@@ -1,0 +1,16 @@
+{
+  "name": "roam-persistent-sidebar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Persistent Sidebar for Roam Research: everything in the right sidebar comes back after a restart.",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/*.test.js"
+  },
+  "author": "Matt Sweeney",
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "0.24.0"
+  }
+}
