@@ -25,6 +25,7 @@ const LOG_PAGE = 'Sidebar Log';
 const WIDTH = 1280, HEIGHT = 800;
 
 fs.mkdirSync(OUT, { recursive: true });
+for (const f of fs.readdirSync(OUT)) if (f.startsWith('debug-')) fs.rmSync(path.join(OUT, f)); // from an earlier run
 roam.logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'real-roam-'));
 
 // A few pages to fill the sidebar with. Each entry is a block, or [block, its children].
@@ -53,14 +54,13 @@ const makePages = () => evalIn(async (PAGES) => {
       await add(uid, children);
     }
   };
+  // A page can be there already and empty, made by a [[link]] to it from another page.
+  const empty = (uid) => !api.data.q('[:find ?b . :in $ ?u :where [?p :block/uid ?u] [?p :block/children ?b]]', uid);
   const uids = {};
   for (const [title, items] of Object.entries(PAGES)) {
-    if (!uidOf(title)) {
-      const uid = api.util.generateUID();
-      await api.data.page.create({ page: { title, uid } });
-      await add(uid, items);
-    }
+    if (!uidOf(title)) await api.data.page.create({ page: { title, uid: api.util.generateUID() } });
     uids[title] = uidOf(title);
+    if (empty(uids[title])) await add(uids[title], items);
   }
   await new Promise((r) => setTimeout(r, 500));
   uids.block = api.data.q('[:find ?c . :in $ ?u :where [?p :block/uid ?u] [?p :block/children ?b] [?b :block/order 0] [?b :block/uid ?c]]', uids.Sintra);
@@ -75,12 +75,13 @@ const openPage = async (title) => {
 const windowCount = () => evalIn(() => window.roamAlphaAPI.ui.rightSidebar.getWindows().length);
 const savedCount = () => evalIn((key) => JSON.parse(localStorage.getItem(key) ?? 'null')?.windows.length ?? -1, KEY);
 
+let cdp = null;
 /** Starts Roam and opens the graph at twice the pixel density, so the pictures are sharp. */
 async function start() {
   await launchRoam();
   await signIn(EMAIL, PASSWORD);
   await openGraph(GRAPH);
-  const cdp = await roam.page.context().newCDPSession(roam.page); // kept open: the override ends with it
+  cdp = await roam.page.context().newCDPSession(roam.page); // kept open: the override ends with it
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: WIDTH, height: HEIGHT, deviceScaleFactor: 2, mobile: false });
   await sleep(1000);
 }
@@ -103,7 +104,9 @@ async function snap(name, clip) {
   await evalIn(() => document.querySelectorAll('.bp3-toast .bp3-button').forEach((b) => b.click()));
   await roam.page.mouse.move(WIDTH / 2, HEIGHT - 4);
   await sleep(500);
-  await roam.page.screenshot({ path: path.join(OUT, `${name}.png`), ...(clip ? { clip } : {}) });
+  // Straight from the page's own session: Playwright's screenshot puts its own 1x viewport back first.
+  const { data } = await cdp.send('Page.captureScreenshot', { format: 'png', ...(clip ? { clip: { ...clip, scale: 1 } } : {}) });
+  fs.writeFileSync(path.join(OUT, `${name}.png`), Buffer.from(data, 'base64'));
   log('saved', `${name}.png`, clip ? JSON.stringify(clip) : '');
 }
 
