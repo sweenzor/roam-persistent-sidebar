@@ -16,7 +16,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { roam, log, sleep, evalIn, serve, stopServing, launchRoam, quitRoam, waitFor, shot, signIn, openGraph, loadDevExtension, EXT_URL } from './roam.mjs';
+import {
+  roam, log, sleep, evalIn, serve, stopServing, launchRoam, quitRoam, waitFor, shot, signIn, openGraph, loadDevExtension, EXT_URL,
+  sb, clearSidebar, deletePage, logSettings,
+} from './roam.mjs';
 
 const EMAIL = process.env.ROAM_EMAIL, PASSWORD = process.env.ROAM_PASSWORD;
 delete process.env.ROAM_EMAIL; delete process.env.ROAM_PASSWORD;
@@ -61,17 +64,6 @@ const savedNow = () => evalIn((key) => {
 }, KEY);
 const describe = (s) => `${s.open ? 'open' : 'closed'}: ${s.windows.map((w) => `${w.key}${w.collapsed ? ' collapsed' : ''}${w.pinned ? ' pinned' : ''}`).join(', ') || 'none'}`;
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-/** Runs `fn(sidebar, w)` in the page, where `w(key)` turns a window key back into an API window. */
-const sb = (body, arg) => evalIn(async ([body, arg]) => {
-  const sb = window.roamAlphaAPI.ui.rightSidebar;
-  const w = (key) => { const [type, id] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)]; return type === 'search-query' ? { type, 'search-query-str': id } : { type, 'block-uid': id }; };
-  return new Function('sb', 'w', 'arg', `return (async () => { ${body} })()`)(sb, w, arg);
-}, [body, arg]);
-
-async function clearSidebar() {
-  await sb(`for (const x of sb.getWindows()) { const k = x.type + ':' + (x['search-query-str'] ?? x['block-uid'] ?? x['page-uid'] ?? x['mentions-uid']);
-    if (x['pinned?']) await sb.unpinWindow({ window: w(k) }); await sb.removeWindow({ window: w(k) }); }`);
-}
 /** Pages and a block to open in the sidebar. Signed in, made on a test page; in the help graph, found. */
 async function targets() {
   return evalIn(async ([PUBLIC, TEST_PAGE, OTHER_PAGE]) => {
@@ -183,7 +175,7 @@ async function main() {
       return want.every((x) => lines.includes(x)) && lines;
     }, 15000).catch(() => null);
 
-    await logSettings({ on: true });
+    await logSettings({ on: true, beforeClose: () => shot('settings-sidebar-log-on') });
     await openAndClose();
     const got = await entries(LOG_PAGE, logStart);
     check('With the switch on, opening and closing a window adds both to the page Sidebar Log', !!got, got?.join(' / ') ?? 'no entries');
@@ -194,7 +186,7 @@ async function main() {
     await sleep(1500);
     await shot('sidebar-log-page');
 
-    await logSettings({ page: CUSTOM_LOG_PAGE });
+    await logSettings({ page: CUSTOM_LOG_PAGE, beforeClose: () => shot('settings-log-page-named') });
     const mid = (await logLines()).length;
     await openAndClose();
     const got2 = await entries(CUSTOM_LOG_PAGE, 0);
@@ -215,53 +207,10 @@ const logTree = (title) => evalIn((title) => {
   const byOrder = (a, b) => a[':block/order'] - b[':block/order'];
   return (page?.[':block/children'] ?? []).sort(byOrder).map((d) => [d[':block/string'], (d[':block/children'] ?? []).sort(byOrder).map((c) => c[':block/string'])]);
 }, title);
-const deletePage = (title) => evalIn(async (title) => {
-  const uid = window.roamAlphaAPI.data.q('[:find ?u . :in $ ?t :where [?p :node/title ?t] [?p :block/uid ?u]]', title);
-  if (uid) await window.roamAlphaAPI.data.page.delete({ page: { uid } });
-}, title);
 /** Every entry on a log page, oldest first. */
 const logLines = async (title = LOG_PAGE) => (await logTree(title)).flatMap((d) => d[1]);
 /** The last day block on a log page. */
 const logDay = async (title) => (await logTree(title)).at(-1)?.[0] ?? null;
-/** Opens the Persistent Sidebar settings tab, sets the Sidebar log switch (`on`) and the Sidebar log
- *  page field (`page`) when given, and returns how the switch was before. */
-async function logSettings({ on, page }) {
-  await evalIn(() => document.querySelector('.rm-topbar .bp3-icon-more')?.click());
-  await waitFor('the More menu', () => evalIn(() => !!document.querySelector('.bp3-menu-item')), 5000);
-  await evalIn(() => [...document.querySelectorAll('.bp3-menu-item')].find((e) => /^Settings/.test(e.innerText.trim()))?.click());
-  await waitFor('the Persistent Sidebar settings tab', () => evalIn(() => {
-    const tab = [...document.querySelectorAll('.bp3-dialog *')].find((e) => e.children.length === 0 && /^Persistent Sidebar/.test(e.textContent.trim()));
-    tab?.click(); return !!tab;
-  }), 15000);
-  // The dialog keeps other tabs' controls around, so find ours by the name on their rows.
-  const control = (name, selector) => evalIn(([name, selector]) => {
-    const label = [...document.querySelectorAll('.bp3-dialog *')].find((e) => e.children.length === 0 && e.textContent.trim() === name && e.offsetParent);
-    let row = label;
-    while (row && !row.querySelector(selector)) row = row.parentElement;
-    const el = row?.closest('.bp3-dialog') ? row.querySelector(selector) : null;
-    if (!el) return null;
-    document.querySelectorAll('[data-ps-control]').forEach((e) => e.removeAttribute('data-ps-control'));
-    el.setAttribute('data-ps-control', '');
-    return { checked: !!el.checked, value: el.value ?? '' };
-  }, [name, selector]);
-  const sw = () => control('Sidebar log', '.bp3-switch input');
-  const was = await waitFor('the Sidebar log switch', sw, 10000);
-  if (on !== undefined && was.checked !== on) {
-    await evalIn(() => document.querySelector('[data-ps-control]').click());
-    await sleep(800);
-    if ((await sw())?.checked !== on) throw new Error(`could not turn the Sidebar log switch ${on ? 'on' : 'off'}`);
-  }
-  if (page !== undefined) {
-    await waitFor('the Sidebar log page field', () => control('Sidebar log page', 'input:not([type="checkbox"])'), 10000);
-    await roam.page.locator('[data-ps-control]').fill(page);
-    await roam.page.keyboard.press('Tab');
-    await sleep(1000);
-  }
-  if (on || page) await shot(`settings-${page ? 'log-page-named' : 'sidebar-log-on'}`);
-  await roam.page.keyboard.press('Escape'); await sleep(500);
-  return { on: was.checked };
-}
-
 let failure = '';
 try { await main(); } catch (e) { failure = e.message.split('\n')[0]; log('ERROR', e.stack ?? e.message); await shot('error'); }
 try { if (roam.page) await clearSidebar(); } catch { /* best effort */ }

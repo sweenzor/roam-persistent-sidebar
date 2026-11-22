@@ -185,3 +185,64 @@ export async function loadDevExtension() {
   await sleep(3000);
   await dismissDialogs();
 }
+
+// ---------- the sidebar, pages and this extension's settings ----------
+/** Runs `fn(sidebar, w)` in the page, where `w(key)` turns a window key back into an API window. */
+export const sb = (body, arg) => evalIn(async ([body, arg]) => {
+  const sb = window.roamAlphaAPI.ui.rightSidebar;
+  const w = (key) => { const [type, id] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)]; return type === 'search-query' ? { type, 'search-query-str': id } : { type, 'block-uid': id }; };
+  return new Function('sb', 'w', 'arg', `return (async () => { ${body} })()`)(sb, w, arg);
+}, [body, arg]);
+
+export async function clearSidebar() {
+  await sb(`for (const x of sb.getWindows()) { const k = x.type + ':' + (x['search-query-str'] ?? x['block-uid'] ?? x['page-uid'] ?? x['mentions-uid']);
+    if (x['pinned?']) await sb.unpinWindow({ window: w(k) }); await sb.removeWindow({ window: w(k) }); }`);
+}
+export const deletePage = (title) => evalIn(async (title) => {
+  const uid = window.roamAlphaAPI.data.q('[:find ?u . :in $ ?t :where [?p :node/title ?t] [?p :block/uid ?u]]', title);
+  if (uid) await window.roamAlphaAPI.data.page.delete({ page: { uid } });
+}, title);
+/** Opens the Persistent Sidebar tab in Settings. */
+export async function openExtensionSettings() {
+  await evalIn(() => document.querySelector('.rm-topbar .bp3-icon-more')?.click());
+  await waitFor('the More menu', () => evalIn(() => !!document.querySelector('.bp3-menu-item')), 5000);
+  await evalIn(() => [...document.querySelectorAll('.bp3-menu-item')].find((e) => /^Settings/.test(e.innerText.trim()))?.click());
+  await waitFor('the Persistent Sidebar settings tab', () => evalIn(() => {
+    const tab = [...document.querySelectorAll('.bp3-dialog *')].find((e) => e.children.length === 0 && /^Persistent Sidebar/.test(e.textContent.trim()));
+    tab?.click(); return !!tab;
+  }), 15000);
+}
+/** Finds a control in the open settings tab by the name on its row, and marks it [data-ps-control].
+ *  The dialog keeps other tabs' controls around, so the first switch in it is not ours. */
+export const settingsControl = (name, selector) => evalIn(([name, selector]) => {
+  const label = [...document.querySelectorAll('.bp3-dialog *')].find((e) => e.children.length === 0 && e.textContent.trim() === name && e.offsetParent);
+  let row = label;
+  while (row && !row.querySelector(selector)) row = row.parentElement;
+  const el = row?.closest('.bp3-dialog') ? row.querySelector(selector) : null;
+  if (!el) return null;
+  document.querySelectorAll('[data-ps-control]').forEach((e) => e.removeAttribute('data-ps-control'));
+  el.setAttribute('data-ps-control', '');
+  return { checked: !!el.checked, value: el.value ?? '' };
+}, [name, selector]);
+/** Opens the Persistent Sidebar settings tab, sets the Sidebar log switch (`on`) and the Sidebar log
+ *  page field (`page`) when given, calls `beforeClose` with the tab still open, and returns how the
+ *  switch was before. */
+export async function logSettings({ on, page, beforeClose }) {
+  await openExtensionSettings();
+  const sw = () => settingsControl('Sidebar log', '.bp3-switch input');
+  const was = await waitFor('the Sidebar log switch', sw, 10000);
+  if (on !== undefined && was.checked !== on) {
+    await evalIn(() => document.querySelector('[data-ps-control]').click());
+    await sleep(800);
+    if ((await sw())?.checked !== on) throw new Error(`could not turn the Sidebar log switch ${on ? 'on' : 'off'}`);
+  }
+  if (page !== undefined) {
+    await waitFor('the Sidebar log page field', () => settingsControl('Sidebar log page', 'input:not([type="checkbox"])'), 10000);
+    await roam.page.locator('[data-ps-control]').fill(page);
+    await roam.page.keyboard.press('Tab');
+    await sleep(1000);
+  }
+  await beforeClose?.();
+  await roam.page.keyboard.press('Escape'); await sleep(500);
+  return { on: was.checked };
+}
