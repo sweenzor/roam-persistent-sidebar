@@ -19,7 +19,7 @@ Before every release: each feature has a section and a screenshot in `README.md`
 retaken for that release. Run the Screenshots workflow on the release branch (`test/real-roam/screenshots.mjs`,
 signed in to the test graph): it commits the pictures to `docs/images` and points the README's image links at
 that commit. A new feature needs a new picture in that script. Then bump `source_commit` in the Depot listing
-(`docs/roam-persistent-sidebar.json` is the draft) to the merged commit on `main`.
+(`extensions/sweenzor/roam-persistent-sidebar.json` in the fork sweenzor/roam-depot) to the merged commit on `main`.
 
 ## Layout
 
