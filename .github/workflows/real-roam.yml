@@ -12,6 +12,7 @@ on:
     paths:
       - 'src/**'
       - 'test/real-roam/**'
+      - '!test/real-roam/screenshots.mjs'
       - 'package*.json'
       - '.github/workflows/real-roam.yml'
   workflow_dispatch:
