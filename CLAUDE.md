@@ -13,6 +13,14 @@ npm run build    # esbuild src/index.js -> dist/extension.js (load dist/ as a Ro
 DISPLAY=:99 node test/real-roam/run.mjs   # real Roam desktop app; ROAM_EMAIL/ROAM_PASSWORD to sign in, else public help graph
 ```
 
+## Releasing to Roam Depot
+
+Before every release: each feature has a section and a screenshot in `README.md`, and the screenshots are
+retaken for that release. Run the Screenshots workflow on the release branch (`test/real-roam/screenshots.mjs`,
+signed in to the test graph): it commits the pictures to `docs/images` and points the README's image links at
+that commit. A new feature needs a new picture in that script. Then bump `source_commit` in the Depot listing
+(`docs/roam-persistent-sidebar.json` is the draft) to the merged commit on `main`.
+
 ## Layout
 
 - `src/sidebar.js` pure read/restore logic over `roamAlphaAPI.ui.rightSidebar`.

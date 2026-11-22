@@ -100,6 +100,18 @@ const boxOf = (selector, pad = 0) => evalIn(([selector, pad, W, H]) => {
   const x = Math.max(0, r.left - pad), y = Math.max(0, r.top - pad);
   return { x, y, width: Math.min(W, r.right + pad) - x, height: Math.min(H, r.bottom + pad) - y };
 }, [selector, pad, WIDTH, HEIGHT]);
+/** How far down the text in `selector` goes, so a picture can stop there and not show empty space. */
+const fold = (selector = '.roam-article *, #right-sidebar .rm-sidebar-window *', pad = 28) => evalIn(([selector, pad, H]) => {
+  let bottom = 0;
+  for (const e of document.querySelectorAll(selector)) {
+    if (e.children.length || !e.textContent.trim()) continue;
+    const r = e.getBoundingClientRect();
+    if (r.width && r.height) bottom = Math.max(bottom, r.bottom);
+  }
+  return Math.min(H, Math.ceil(bottom + pad));
+}, [selector, pad, HEIGHT]);
+/** The whole window, down to where its text ends. */
+const windowBox = async () => ({ x: 0, y: 0, width: WIDTH, height: await fold() });
 async function snap(name, clip) {
   await evalIn(() => document.querySelectorAll('.bp3-toast .bp3-button').forEach((b) => b.click()));
   await roam.page.mouse.move(WIDTH / 2, HEIGHT - 4);
@@ -127,7 +139,7 @@ async function main() {
     await sb.addWindow({ window: w('outline:' + arg['Restaurants to try']) });`, u);
   await restart(3);
   await openPage('Lisbon trip');
-  await snap('sidebar-restored');
+  await snap('sidebar-restored', await windowBox());
 
   // 2. One window of every kind, some collapsed and one pinned, Roam quit and started again.
   await clearSidebar();
@@ -144,8 +156,8 @@ async function main() {
     await sb.collapseWindow({ window: w('outline:' + arg['Restaurants to try']) });
     await sb.pinWindow({ window: w('outline:' + arg['Packing list']) });`, u);
   await restart(6);
-  await openPage('Lisbon trip');
-  await snap('window-kinds', await boxOf('#right-sidebar'));
+  await openPage('Sintra');
+  await snap('window-kinds', await windowBox());
 
   // 3. The settings tab, with the log switched on.
   await logSettings({
@@ -160,7 +172,6 @@ async function main() {
         n?.setAttribute('data-ps-shot', '');
       });
       await snap('settings', await boxOf('[data-ps-shot]', 16));
-      await snap('debug-settings-dialog', await boxOf('.bp3-dialog'));
     },
   });
 
@@ -176,11 +187,13 @@ async function main() {
     return (page?.[':block/children'] ?? []).flatMap((d) => d[':block/children'] ?? []).length >= 3;
   }, LOG_PAGE), 15000);
   await openPage(LOG_PAGE);
-  await snap('sidebar-log');
+  await snap('sidebar-log', await windowBox());
 
   // 5. A page that was opened in the sidebar lists the log in its Linked References.
   await openPage('Alfama');
-  await snap('sidebar-log-linked-references', await boxOf('.roam-article', 8));
+  const article = await boxOf('.roam-article');
+  const top = (await boxOf('.roam-article .rm-title-display')).y - 28;
+  await snap('sidebar-log-linked-references', { ...article, y: top, height: (await fold('.roam-article *')) - top });
 }
 
 let failure = '';

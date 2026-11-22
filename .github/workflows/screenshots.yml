@@ -1,6 +1,9 @@
 # Takes the README's screenshots in Roam's real desktop app (Linux build, under Xvfb), signed in to the
-# hosted test graph, and commits them to docs/images on the branch it ran for. See
-# test/real-roam/screenshots.mjs. Needs the same ROAM_EMAIL and ROAM_PASSWORD secrets as Real Roam.
+# hosted test graph, commits them to docs/images on the branch it ran for, and points the README's image
+# links at that commit (Roam Depot shows the README, and needs links pinned to a commit). Run it before
+# every release to Roam Depot, so the pictures show the build being released: Actions -> Screenshots ->
+# Run workflow, on the release branch. See test/real-roam/screenshots.mjs. Needs the same ROAM_EMAIL and
+# ROAM_PASSWORD secrets as Real Roam.
 name: Screenshots
 
 on:
@@ -80,6 +83,7 @@ jobs:
           npm install --no-save --no-audit --no-fund --prefix "$RUNNER_TEMP/pw" playwright-core@1.63.0
 
       - name: Take the screenshots in real Roam
+        id: shots
         if: steps.creds.outputs.ok == 'true'
         env:
           ROAM_EMAIL: ${{ secrets.ROAM_EMAIL }}
@@ -92,13 +96,20 @@ jobs:
 
       - name: Commit the screenshots
         if: always() && steps.creds.outputs.ok == 'true'
+        env:
+          TAKEN: ${{ steps.shots.outcome == 'success' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add docs/images
           if git diff --cached --quiet; then
             echo "No screenshots changed."
-          else
-            git commit -m "Update README screenshots"
-            git push origin "HEAD:$BRANCH"
+            exit 0
           fi
+          git commit -m "Update README screenshots"
+          if [ "$TAKEN" = true ]; then
+            sha=$(git rev-parse HEAD)
+            sed -i -E "s#(raw\.githubusercontent\.com/${GITHUB_REPOSITORY}/)[0-9a-f]{40}(/docs/images/)#\1${sha}\2#g" README.md
+            git diff --quiet README.md || git commit -m "Point the README at the new screenshots" README.md
+          fi
+          git push origin "HEAD:$BRANCH"
