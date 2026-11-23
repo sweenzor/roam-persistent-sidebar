@@ -20,6 +20,7 @@ import {
   roam, log, sleep, evalIn, serve, stopServing, launchRoam, quitRoam, waitFor, shot, signIn, openGraph, loadDevExtension, EXT_URL,
   sb, clearSidebar, deletePage, logSettings,
 } from './roam.mjs';
+import { checkPlan } from './plan.mjs';
 
 const EMAIL = process.env.ROAM_EMAIL, PASSWORD = process.env.ROAM_PASSWORD;
 delete process.env.ROAM_EMAIL; delete process.env.ROAM_PASSWORD;
@@ -82,7 +83,10 @@ async function targets() {
 /** Starts Roam, opens the graph and, in the help graph, loads the build into the page. */
 async function start() {
   await launchRoam();
-  if (!PUBLIC) await signIn(EMAIL, PASSWORD);
+  if (!PUBLIC) {
+    await signIn(EMAIL, PASSWORD);
+    { const plan = await checkPlan(roam.page, new URL('../test-account-plan.test.js', import.meta.url)); check("The test account's plan is Believer, ends more than a year away, on the date the unit test pins", plan.ok, plan.detail); }
+  }
   await openGraph(GRAPH);
   if (PUBLIC) await evalIn(async (url) => { const m = await import(`${url}extension.js?${Date.now()}`); m.default.onload({ extensionAPI: { settings: { get: () => false } } }); }, EXT_URL);
 }
