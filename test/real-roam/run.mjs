@@ -85,7 +85,7 @@ async function start() {
   await launchRoam();
   if (!PUBLIC) {
     await signIn(EMAIL, PASSWORD);
-    { const plan = await checkPlan(roam.page, new URL('../test-account-plan.test.js', import.meta.url)); check("The test account's plan is Believer, ends more than a year away, on the date the unit test pins", plan.ok, plan.detail); }
+    { const plan = await checkPlan(roam.page, new URL('../test-account-plan.test.js', import.meta.url), GRAPH.startsWith('offline/') ? `#/${GRAPH}` : `#/app/${GRAPH}`); check("The test account's plan is Believer, ends more than a year away, on the date the unit test pins", plan.ok, plan.detail); }
   }
   await openGraph(GRAPH);
   if (PUBLIC) await evalIn(async (url) => { const m = await import(`${url}extension.js?${Date.now()}`); m.default.onload({ extensionAPI: { settings: { get: () => false } } }); }, EXT_URL);
