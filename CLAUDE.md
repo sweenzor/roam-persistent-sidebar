@@ -38,4 +38,4 @@ that commit. A new feature needs a new picture in that script. Then bump `source
 
 ## Test account plan
 
-Real-Roam CI signs in to a Roam test account with a Believer plan that ends on 2031-11-23 (without a plan its local graphs are read-only). `test/test-account-plan.test.js` fails from a year before that; after renewing, put the new end date there. Each signed-in real-Roam run also reads the plan from Roam's Billing page (`test/real-roam/plan.mjs`, account menu > Billing, before a graph opens) and fails if it isn't Believer, ends within a year, or differs from that date.
+Real-Roam CI signs in to a Roam test account with a Believer plan (without a plan its local graphs are read-only). Each signed-in real-Roam run (`test/real-roam/run.mjs`) reads the plan from Roam's Billing page with `test/real-roam/plan.mjs` (account menu > Billing on the graph list, else Settings > Account > Open Billing) and fails if it isn't Believer or ends within a year.
