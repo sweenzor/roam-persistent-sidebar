@@ -35,3 +35,7 @@ that commit. A new feature needs a new picture in that script. Then bump `source
   all are added back with `block-uid` (or `search-query-str`).
 - Sidebar open = `#roam-right-sidebar-content` exists. Windows survive `close()`.
 - In the public help graph nothing in the sidebar survives a restart, pinned or not.
+
+## Test account plan
+
+Real-Roam CI signs in to a Roam test account with a Believer plan that ends on 2031-11-23 (without a plan its local graphs are read-only). `test/test-account-plan.test.js` fails from a year before that; after renewing, put the new end date there.
