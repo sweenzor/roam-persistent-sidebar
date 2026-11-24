@@ -45,6 +45,10 @@ that commit. A new feature needs a new picture in that script. Then bump `source
 - `addWindow` puts the window at the top and opens the sidebar. `getWindows` reports `page-uid` for
   outline/mentions/graph of a page, `mentions-uid` for mentions of a block, `search-query-str` for search;
   all are added back with `block-uid` (or `search-query-str`).
+- Roam brings its pinned windows back itself a moment after the graph opens (later than the extension's
+  own restore, measured in desktop 0.0.43). Adding a page or block that is open already changes nothing
+  (`window-id` is `sidebar-<type>-<uid>`), but every `addWindow` of a search makes a new window
+  (`sidebar-search-query-uuid…`). So a pinned search is left to Roam for 8 s (`PINNED_WAIT`) before it is added.
 - Sidebar open = `#roam-right-sidebar-content` exists. Windows survive `close()`.
 - In the public help graph nothing in the sidebar survives a restart, pinned or not.
 

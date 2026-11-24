@@ -53,30 +53,30 @@ const saved = {
 
 test('restores every window in order, with collapsed and pinned state, and opens the sidebar', async () => {
   const f = fakeApi();
-  await restore(f.api, saved, { exists: f.exists });
+  await restore(f.api, saved, { exists: f.exists, addPinnedSearches: true });
   assert.deepEqual(readWindows(f.sb), saved.windows);
   assert.equal(f.isOpen(), true);
 });
 
 test('read then restore round-trips', async () => {
   const a = fakeApi();
-  await restore(a.api, saved, { exists: a.exists });
+  await restore(a.api, saved, { exists: a.exists, addPinnedSearches: true });
   const snap = { open: true, windows: readWindows(a.sb) };
   const b = fakeApi();
-  await restore(b.api, snap, { exists: b.exists });
+  await restore(b.api, snap, { exists: b.exists, addPinnedSearches: true });
   assert.deepEqual(readWindows(b.sb), readWindows(a.sb));
 });
 
 test('keeps the sidebar closed when it was closed', async () => {
   const f = fakeApi();
-  await restore(f.api, { ...saved, open: false }, { exists: f.exists });
+  await restore(f.api, { ...saved, open: false }, { exists: f.exists, addPinnedSearches: true });
   assert.equal(readWindows(f.sb).length, 4);
   assert.equal(f.isOpen(), false);
 });
 
 test('skips windows whose page or block was deleted', async () => {
   const f = fakeApi(['p1']);
-  const n = await restore(f.api, saved, { exists: f.exists });
+  const n = await restore(f.api, saved, { exists: f.exists, addPinnedSearches: true });
   assert.equal(n.count, 2);
   assert.deepEqual(readWindows(f.sb).map(windowKey), ['outline:p1', 'search-query:todo']);
 });
@@ -86,7 +86,7 @@ test('windows Roam already put back (pinned ones) are not doubled and end up in 
   await f.sb.addWindow({ window: { type: 'mentions', 'block-uid': 'p2' } });
   await f.sb.pinWindow({ window: { type: 'mentions', 'block-uid': 'p2' } });
   await f.sb.addWindow({ window: { type: 'outline', 'block-uid': 'p3' } }); // open now, not saved
-  await restore(f.api, saved, { exists: f.exists });
+  await restore(f.api, saved, { exists: f.exists, addPinnedSearches: true });
   assert.deepEqual(readWindows(f.sb).map(windowKey), [...saved.windows.map(windowKey), 'outline:p3']);
   assert.equal(readWindows(f.sb)[3].pinned, true);
 });
@@ -96,7 +96,7 @@ test('windows that are open already are moved into place, never taken out and ad
   for (const w of [{ type: 'mentions', 'block-uid': 'p2' }, { type: 'outline', 'block-uid': 'p1' }]) await f.sb.addWindow({ window: w });
   await f.sb.pinWindow({ window: { type: 'mentions', 'block-uid': 'p2' } });
   f.calls.length = 0;
-  const r = await restore(f.api, saved, { exists: f.exists });
+  const r = await restore(f.api, saved, { exists: f.exists, addPinnedSearches: true });
   assert.equal(r.ok, true);
   assert.deepEqual(f.calls.filter(([c]) => c === 'remove'), []);
   assert.deepEqual(f.calls.filter(([c]) => c === 'add').map(([, k]) => k), ['search-query:todo', 'block:b1']);
@@ -105,7 +105,7 @@ test('windows that are open already are moved into place, never taken out and ad
 
 test('one window that cannot be added does not stop the others, their order or their pins', async () => {
   const f = fakeApi(undefined, { fail: (name, key) => name === 'addWindow' && key === 'block:b1' });
-  const r = await restore(f.api, saved, { exists: f.exists });
+  const r = await restore(f.api, saved, { exists: f.exists, addPinnedSearches: true });
   assert.equal(r.ok, false);
   assert.deepEqual(r.failed.map((x) => [x.step, x.window]), [['add', 'block:b1']]);
   assert.deepEqual(readWindows(f.sb), saved.windows.filter((w) => w.uid !== 'b1'));
@@ -117,7 +117,7 @@ test('a window Roam put back pinned keeps its pin when other steps fail', async 
   const f = fakeApi(undefined, { fail: (name, key) => (name === 'addWindow' && key === 'outline:p1') || (name === 'setWindowOrder' && key === 'mentions:p2') });
   await f.sb.addWindow({ window: { type: 'mentions', 'block-uid': 'p2' } });
   await f.sb.pinWindow({ window: { type: 'mentions', 'block-uid': 'p2' } });
-  const r = await restore(f.api, pinned, { exists: f.exists });
+  const r = await restore(f.api, pinned, { exists: f.exists, addPinnedSearches: true });
   assert.equal(r.ok, false);
   assert.deepEqual(f.calls.filter(([c]) => c === 'remove'), []);
   const now = readWindows(f.sb);
@@ -128,9 +128,9 @@ test('a window Roam put back pinned keeps its pin when other steps fail', async 
 test('a second try after a failure adds only what is still missing', async () => {
   let refuse = true;
   const f = fakeApi(undefined, { fail: (name, key) => refuse && name === 'addWindow' && key === 'block:b1' });
-  assert.equal((await restore(f.api, saved, { exists: f.exists })).ok, false);
+  assert.equal((await restore(f.api, saved, { exists: f.exists, addPinnedSearches: true })).ok, false);
   refuse = false; f.calls.length = 0;
-  assert.equal((await restore(f.api, saved, { exists: f.exists })).ok, true);
+  assert.equal((await restore(f.api, saved, { exists: f.exists, addPinnedSearches: true })).ok, true);
   assert.deepEqual(f.calls.filter(([c]) => c === 'add'), [['add', 'block:b1']]);
   assert.deepEqual(readWindows(f.sb), saved.windows);
 });
@@ -140,7 +140,7 @@ test('stops between steps once it is cancelled, and says so', async () => {
   let adds = 0;
   const add = f.sb.addWindow;
   f.sb.addWindow = async (a) => { adds++; return add(a); };
-  const r = await restore(f.api, saved, { exists: f.exists, cancelled: () => adds >= 2 });
+  const r = await restore(f.api, saved, { exists: f.exists, addPinnedSearches: true, cancelled: () => adds >= 2 });
   assert.equal(r.cancelled, true);
   assert.equal(r.ok, false);
   assert.equal(adds, 2);
@@ -148,17 +148,35 @@ test('stops between steps once it is cancelled, and says so', async () => {
   assert.equal(readWindows(f.sb).some((w) => w.collapsed || w.pinned), false);
 });
 
+test('a pinned search is left for Roam to put back, then moved into place; it is never added twice', async () => {
+  const f = fakeApi();
+  const first = await restore(f.api, saved, { exists: f.exists });
+  assert.equal(first.ok, false);
+  assert.deepEqual(first.waiting, ['search-query:todo']);
+  assert.deepEqual(first.failed, []);
+  assert.deepEqual(readWindows(f.sb).map(windowKey), ['outline:p1', 'block:b1', 'mentions:p2']);
+  // Roam brings it back, pinned, below the others.
+  await f.sb.addWindow({ window: { type: 'search-query', 'search-query-str': 'todo' } });
+  await f.sb.pinWindow({ window: { type: 'search-query', 'search-query-str': 'todo' } });
+  await f.sb.setWindowOrder({ window: { type: 'search-query', 'search-query-str': 'todo', order: 3 } });
+  f.calls.length = 0;
+  const second = await restore(f.api, saved, { exists: f.exists });
+  assert.equal(second.ok, true);
+  assert.deepEqual(f.calls.filter(([c]) => c === 'add'), []);
+  assert.deepEqual(readWindows(f.sb), saved.windows);
+});
+
 test('does nothing when the sidebar already matches', async () => {
   const f = fakeApi();
-  await restore(f.api, saved, { exists: f.exists });
+  await restore(f.api, saved, { exists: f.exists, addPinnedSearches: true });
   f.calls.length = 0;
-  await restore(f.api, saved, { exists: f.exists });
+  await restore(f.api, saved, { exists: f.exists, addPinnedSearches: true });
   assert.deepEqual(f.calls, []);
 });
 
 test('an empty save leaves the sidebar alone', async () => {
   const f = fakeApi();
   await f.sb.addWindow({ window: { type: 'outline', 'block-uid': 'p3' } });
-  await restore(f.api, { open: true, windows: [] }, { exists: f.exists });
+  await restore(f.api, { open: true, windows: [] }, { exists: f.exists, addPinnedSearches: true });
   assert.deepEqual(readWindows(f.sb).map(windowKey), ['outline:p3']);
 });

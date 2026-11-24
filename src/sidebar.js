@@ -41,13 +41,19 @@ export const sameState = (a, b) => JSON.stringify(a) === JSON.stringify(b);
  * Every call to Roam is tried on its own: one that fails is noted in `failed` and the rest still run.
  * `cancelled` is asked before each call; once it says yes nothing more is done. The caller keeps the
  * old save unless `ok` is true. Running it again is safe: it only does what is still missing.
+ *
+ * A pinned search is left for Roam to put back (measured in Roam desktop 0.0.43: Roam brings its pinned
+ * windows back a moment after the graph opens, and while a page or block added twice is still one
+ * window, a search added twice is two). Until it is there it is listed in `waiting` and `ok` is false;
+ * with `addPinnedSearches` it is added like any other window, for when Roam did not bring it back.
  */
-export async function restore(api, saved, { exists, cancelled = () => false } = {}) {
+export async function restore(api, saved, { exists, cancelled = () => false, addPinnedSearches = false } = {}) {
   const sb = api.ui.rightSidebar;
   const has = exists ?? ((uid) => !!api.data.pull('[:block/uid]', [':block/uid', uid]));
   const wanted = (saved.windows ?? []).filter((s) => s.type === 'search-query' ? !!s.query : !!s.uid && has(s.uid));
   const failed = [];
-  const result = () => ({ count: wanted.length, failed, cancelled: cancelled(), ok: !failed.length && !cancelled() });
+  const waiting = [];
+  const result = () => ({ count: wanted.length, failed, waiting, cancelled: cancelled(), ok: !failed.length && !waiting.length && !cancelled() });
   /** One call to Roam. False when it failed or the restore was cancelled first. */
   const step = async (what, w, call) => {
     if (cancelled()) return false;
@@ -58,7 +64,9 @@ export async function restore(api, saved, { exists, cancelled = () => false } = 
   // Add what is missing. addWindow puts a window at the top, so add the last one first.
   const open = new Set(keysNow());
   for (const w of [...wanted].reverse()) {
-    if (!open.has(windowKey(w))) await step('add', w, () => sb.addWindow({ window: apiWindow(w) }));
+    if (open.has(windowKey(w))) continue;
+    if (w.type === 'search-query' && w.pinned && !addPinnedSearches) { waiting.push(windowKey(w)); continue; }
+    await step('add', w, () => sb.addWindow({ window: apiWindow(w) }));
   }
   // Move the saved windows that are open to the top, in their saved order.
   const present = new Set(keysNow());

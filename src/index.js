@@ -7,6 +7,8 @@ import { changes, createLog, LOG_PAGE } from './log.js';
 const TAG = '[persistent-sidebar]';
 const SAVE_DELAY = 300;
 const RESTORE_TRIES = 3, RESTORE_RETRY_DELAY = 1000;
+// How long Roam gets to put a pinned search back itself before the extension adds it.
+const PINNED_WAIT = 8000, PINNED_POLL = 250;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const sidebarOpen = () => !!document.querySelector('#roam-right-sidebar-content');
 
@@ -56,14 +58,19 @@ async function start(extensionAPI) {
   if (stopped) return;
   let restored = true;
   if (saved) {
-    // A step that fails (Roam not ready yet, say) is tried again; restore only does what is missing.
-    for (let attempt = 1; attempt <= RESTORE_TRIES && !stopped; attempt++) {
+    // Restore only does what is missing, so it is run again while Roam is still bringing back a pinned
+    // search, and after a step that failed (Roam not ready yet, say), three times at most.
+    const deadline = Date.now() + PINNED_WAIT;
+    for (let failures = 0; !stopped;) {
       let result;
-      try { result = await restore(api, saved, { cancelled: () => stopped }); } catch (e) { result = { ok: false, failed: [{ step: 'restore', error: e?.message ?? String(e) }] }; }
+      try { result = await restore(api, saved, { cancelled: () => stopped, addPinnedSearches: Date.now() >= deadline }); } catch (e) { result = { ok: false, failed: [{ step: 'restore', error: e?.message ?? String(e) }] }; }
       restored = result.ok;
       if (restored || stopped) break;
-      console.warn(TAG, `could not restore the sidebar (try ${attempt} of ${RESTORE_TRIES}):`, result.failed.map((f) => `${f.step}${f.window ? ` ${f.window}` : ''}: ${f.error}`).join('; '));
-      if (attempt < RESTORE_TRIES) await sleep(RESTORE_RETRY_DELAY);
+      if (result.failed.length) {
+        console.warn(TAG, `could not restore the sidebar (try ${++failures} of ${RESTORE_TRIES}):`, result.failed.map((f) => `${f.step}${f.window ? ` ${f.window}` : ''}: ${f.error}`).join('; '));
+        if (failures >= RESTORE_TRIES) break;
+        await sleep(RESTORE_RETRY_DELAY);
+      } else await sleep(PINNED_POLL);
     }
     await sleep(300);
   }
