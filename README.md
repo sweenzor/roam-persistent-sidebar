@@ -68,7 +68,10 @@ The lines are worded like the window headers in Roam's sidebar:
 | Open a block | `14:06 Opened ((block))`, as a block reference |
 | Close the references to a page | `14:20 Closed References to: [[Sintra]]` |
 | Close a graph view | `14:21 Closed Graph of [[Lisbon trip]]` |
-| Close a search | `14:21 Closed Search: train` |
+| Close a search | ``14:21 Closed Search: `train` ``, with the search text as code |
+
+Search text goes into the log as code, so brackets, tags or anything else you typed into a search stay
+plain text there and link to nothing.
 
 ### The log in Linked References
 

@@ -4,11 +4,17 @@ import { readWindows, restore, windowKey } from '../src/sidebar.js';
 
 // A stand-in for roamAlphaAPI that behaves like Roam's: addWindow puts the window at the top, the
 // sidebar opens when a window is added, and getWindows reports page windows by page-uid.
-function fakeApi(pages = ['p1', 'p2', 'p3', 'b1']) {
+function fakeApi(pages = ['p1', 'p2', 'p3', 'b1'], { fail = () => false } = {}) {
   let wins = [], open = false;
   const key = (w) => w.type === 'search-query' ? `search-query:${w['search-query-str']}` : `${w.type}:${w['block-uid']}`;
   const find = (w) => wins.find((x) => key(x) === key(w));
   const calls = [];
+  // `fail(name, key)` makes that one call reject, as Roam does for a window it cannot act on.
+  const guard = (name, fn) => async (arg) => {
+    const k = arg?.window ? key(arg.window) : null;
+    if (fail(name, k)) { calls.push([`${name} failed`, k]); throw new Error(`${name} refused`); }
+    return fn(arg);
+  };
   const sb = {
     getWindows: () => wins.map((w, order) => {
       const o = { type: w.type, order, 'pinned?': !!w.pinned, 'collapsed?': !!w.collapsed };
@@ -22,9 +28,16 @@ function fakeApi(pages = ['p1', 'p2', 'p3', 'b1']) {
     collapseWindow: async ({ window: w }) => { find(w).collapsed = true; },
     expandWindow: async ({ window: w }) => { find(w).collapsed = false; },
     pinWindow: async ({ window: w }) => { find(w).pinned = true; },
+    setWindowOrder: async ({ window: w }) => {
+      calls.push(['order', key(w), w.order]);
+      const x = find(w);
+      wins = wins.filter((y) => y !== x);
+      wins.splice(w.order, 0, x);
+    },
     open: async () => { open = true; },
     close: async () => { open = false; },
   };
+  for (const name of Object.keys(sb)) if (name !== 'getWindows') sb[name] = guard(name, sb[name]);
   return { api: { ui: { rightSidebar: sb } }, exists: (u) => pages.includes(u), isOpen: () => open, calls, sb };
 }
 
@@ -64,7 +77,7 @@ test('keeps the sidebar closed when it was closed', async () => {
 test('skips windows whose page or block was deleted', async () => {
   const f = fakeApi(['p1']);
   const n = await restore(f.api, saved, { exists: f.exists });
-  assert.equal(n, 2);
+  assert.equal(n.count, 2);
   assert.deepEqual(readWindows(f.sb).map(windowKey), ['outline:p1', 'search-query:todo']);
 });
 
@@ -76,6 +89,63 @@ test('windows Roam already put back (pinned ones) are not doubled and end up in 
   await restore(f.api, saved, { exists: f.exists });
   assert.deepEqual(readWindows(f.sb).map(windowKey), [...saved.windows.map(windowKey), 'outline:p3']);
   assert.equal(readWindows(f.sb)[3].pinned, true);
+});
+
+test('windows that are open already are moved into place, never taken out and added again', async () => {
+  const f = fakeApi();
+  for (const w of [{ type: 'mentions', 'block-uid': 'p2' }, { type: 'outline', 'block-uid': 'p1' }]) await f.sb.addWindow({ window: w });
+  await f.sb.pinWindow({ window: { type: 'mentions', 'block-uid': 'p2' } });
+  f.calls.length = 0;
+  const r = await restore(f.api, saved, { exists: f.exists });
+  assert.equal(r.ok, true);
+  assert.deepEqual(f.calls.filter(([c]) => c === 'remove'), []);
+  assert.deepEqual(f.calls.filter(([c]) => c === 'add').map(([, k]) => k), ['search-query:todo', 'block:b1']);
+  assert.deepEqual(readWindows(f.sb).map(windowKey), saved.windows.map(windowKey));
+});
+
+test('one window that cannot be added does not stop the others, their order or their pins', async () => {
+  const f = fakeApi(undefined, { fail: (name, key) => name === 'addWindow' && key === 'block:b1' });
+  const r = await restore(f.api, saved, { exists: f.exists });
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.failed.map((x) => [x.step, x.window]), [['add', 'block:b1']]);
+  assert.deepEqual(readWindows(f.sb), saved.windows.filter((w) => w.uid !== 'b1'));
+  assert.equal(f.isOpen(), true);
+});
+
+test('a window Roam put back pinned keeps its pin when other steps fail', async () => {
+  const pinned = { ...saved, windows: saved.windows.map((w) => ({ ...w, pinned: true })) };
+  const f = fakeApi(undefined, { fail: (name, key) => (name === 'addWindow' && key === 'outline:p1') || (name === 'setWindowOrder' && key === 'mentions:p2') });
+  await f.sb.addWindow({ window: { type: 'mentions', 'block-uid': 'p2' } });
+  await f.sb.pinWindow({ window: { type: 'mentions', 'block-uid': 'p2' } });
+  const r = await restore(f.api, pinned, { exists: f.exists });
+  assert.equal(r.ok, false);
+  assert.deepEqual(f.calls.filter(([c]) => c === 'remove'), []);
+  const now = readWindows(f.sb);
+  assert.deepEqual(now.map(windowKey).sort(), ['block:b1', 'mentions:p2', 'search-query:todo']);
+  assert.equal(now.every((w) => w.pinned), true);
+});
+
+test('a second try after a failure adds only what is still missing', async () => {
+  let refuse = true;
+  const f = fakeApi(undefined, { fail: (name, key) => refuse && name === 'addWindow' && key === 'block:b1' });
+  assert.equal((await restore(f.api, saved, { exists: f.exists })).ok, false);
+  refuse = false; f.calls.length = 0;
+  assert.equal((await restore(f.api, saved, { exists: f.exists })).ok, true);
+  assert.deepEqual(f.calls.filter(([c]) => c === 'add'), [['add', 'block:b1']]);
+  assert.deepEqual(readWindows(f.sb), saved.windows);
+});
+
+test('stops between steps once it is cancelled, and says so', async () => {
+  const f = fakeApi();
+  let adds = 0;
+  const add = f.sb.addWindow;
+  f.sb.addWindow = async (a) => { adds++; return add(a); };
+  const r = await restore(f.api, saved, { exists: f.exists, cancelled: () => adds >= 2 });
+  assert.equal(r.cancelled, true);
+  assert.equal(r.ok, false);
+  assert.equal(adds, 2);
+  assert.equal(readWindows(f.sb).length, 2);
+  assert.equal(readWindows(f.sb).some((w) => w.collapsed || w.pinned), false);
 });
 
 test('does nothing when the sidebar already matches', async () => {

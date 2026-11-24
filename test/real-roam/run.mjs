@@ -134,12 +134,15 @@ async function main() {
   check('After quitting and starting Roam again, every window is back in order, collapsed and pinned as it was', ok1, describe(after1));
   await shot('after-restart');
 
-  // 3. Change it (close one, move one, collapse another, close the sidebar), then kill Roam outright.
+  // 3. Change it (close one, move one, collapse another, pin a second one, close the sidebar), then kill
+  // Roam outright. Roam puts the two pinned windows back itself, so the extension has to move windows
+  // that are open already into place.
   await sb(`
     await sb.removeWindow({ window: w('graph:' + arg.c) });
     await sb.expandWindow({ window: w('mentions:' + arg.b) });
     await sb.collapseWindow({ window: w('outline:' + arg.a) });
     await sb.setWindowOrder({ window: { ...w('outline:' + arg.a), order: 0 } });
+    await sb.pinWindow({ window: w('search-query:sidebar') });
     await new Promise((r) => setTimeout(r, 500));
     await sb.close();`, t);
   await sleep(1500);
@@ -165,7 +168,44 @@ async function main() {
   const after3 = await sidebarNow();
   check('A sidebar left empty stays empty', after3.windows.length === 0, describe(after3));
 
-  // 5. The sidebar log (signed in only: the help graph can't be written to). Switched on in the
+  // 5. Unloading. A second copy of the build is loaded into the page with the log switched on, a window
+  // is opened, and the copy is unloaded before its 300 ms wait is over: the change must be saved by the
+  // unload itself, and nothing may reach the graph afterwards. (The copy Roam loaded stays, log off.)
+  if (!PUBLIC) await deletePage(UNLOAD_LOG_PAGE);
+  let un = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    await clearSidebar();
+    await sleep(1500);
+    un = await evalIn(async ([url, key, uid, page]) => {
+      const sb = window.roamAlphaAPI.ui.rightSidebar;
+      const m = await import(`${url}extension.js?unload-${Date.now()}`);
+      const settings = { get: (k) => (k === 'log' ? true : k === 'log-page' ? page : undefined), panel: { create() {} } };
+      m.default.onload({ extensionAPI: { settings } });
+      await new Promise((r) => setTimeout(r, 3000)); // started, restored and watching
+      const saved = () => JSON.parse(localStorage.getItem(key) ?? 'null')?.windows.length ?? -1;
+      const before = saved();
+      await sb.addWindow({ window: { type: 'outline', 'block-uid': uid } });
+      const t0 = performance.now();
+      while (!document.querySelector('#roam-right-sidebar-content .rm-sidebar-window') && performance.now() - t0 < 200) await new Promise((r) => setTimeout(r, 10));
+      await new Promise((r) => setTimeout(r, 30));
+      const justBefore = saved();
+      m.default.onunload();
+      return { before, justBefore, after: saved(), ms: Math.round(performance.now() - t0) };
+    }, [EXT_URL, KEY, t.b, UNLOAD_LOG_PAGE]);
+    log('unload', JSON.stringify(un));
+    if (un.justBefore === un.before) break; // else the other copy's own save got in first: try again
+  }
+  check('A window opened just before the extension is unloaded is saved by the unload', un.justBefore === un.before && un.after === un.before + 1, JSON.stringify(un));
+  await sleep(1500);
+  await clearSidebar();
+  await sleep(1500);
+  if (!PUBLIC) {
+    const written = await evalIn((t) => !!window.roamAlphaAPI.data.q('[:find ?p . :in $ ?t :where [?p :node/title ?t]]', t), UNLOAD_LOG_PAGE);
+    check('After unload nothing is written to the graph: the unloaded copy logged neither that window nor its closing', !written);
+    await deletePage(UNLOAD_LOG_PAGE);
+  }
+
+  // 6. The sidebar log (signed in only: the help graph can't be written to). Switched on in the
   // settings tab, then off again, because extension settings are kept in the graph.
   if (!PUBLIC) {
     await deletePage(CUSTOM_LOG_PAGE); // left by a run that stopped early
@@ -190,6 +230,39 @@ async function main() {
     await sleep(1500);
     await shot('sidebar-log-page');
 
+    // Search text is not Roam markup in the log: no page, reference or TODO comes of it.
+    const marked = () => evalIn(([page, pages]) => {
+      const api = window.roamAlphaAPI;
+      const blocks = api.data.q('[:find ?u ?s :in $ ?t :where [?p :node/title ?t] [?b :block/page ?p] [?b :block/uid ?u] [?b :block/string ?s]]', page).filter(([, s]) => s.includes(pages[1]));
+      const refs = blocks.flatMap(([u]) => api.data.pull('[{:block/refs [:block/uid]}]', [':block/uid', u])?.[':block/refs'] ?? []);
+      return { lines: blocks.map(([, s]) => s.replace(/^\d\d:\d\d /, '')), refs: refs.length, pages: pages.filter((t) => api.data.q('[:find ?p . :in $ ?t :where [?p :node/title ?t]]', t)) };
+    }, [LOG_PAGE, MARKUP_PAGES]);
+    const before = (await marked()).lines.length; // from earlier runs: 2 a run
+    await sb(`await sb.addWindow({ window: w('search-query:' + arg) }); await new Promise((r) => setTimeout(r, 1500));
+      await sb.removeWindow({ window: w('search-query:' + arg) });`, MARKUP);
+    const made = await waitFor('the search log entries', async () => { const m = await marked(); return m.lines.length >= before + 2 && m; }, 15000).catch(() => marked());
+    await sleep(1500);
+    check('Search text with [[a link]], a #tag and {{[[TODO]]}} in it is logged as code: no page is made and the lines refer to nothing',
+      made.lines.length === before + 2 && made.lines.every((l) => l.endsWith(`Search: \`${MARKUP}\``)) && made.refs === 0 && made.pages.length === 0, JSON.stringify({ ...made, lines: made.lines.slice(-2), before }));
+
+    // Typing in an open search window changes its text, which is part of what tells windows apart.
+    await sb(`await sb.addWindow({ window: w('search-query:sidebar') });`);
+    await sleep(2000);
+    const n0 = (await logLines()).length;
+    const field = roam.page.locator('#roam-right-sidebar-content .rm-sidebar-window input:not([type="checkbox"])').first();
+    let typed = 'no text field in the search window';
+    if (await field.count()) {
+      await field.click();
+      await roam.page.keyboard.press('End');
+      await roam.page.keyboard.type(' log', { delay: 600 });
+      await sleep(1500);
+      typed = `the window now reports ${JSON.stringify(await evalIn(() => window.roamAlphaAPI.ui.rightSidebar.getWindows().filter((w) => w.type === 'search-query').map((w) => w['search-query-str'])))}`;
+    }
+    const extra = (await logLines()).slice(n0);
+    check('Typing in an open search window adds nothing to the log', extra.length === 0, `${typed}; ${extra.join(' / ') || 'no new lines'}`);
+    await clearSidebar();
+    await sleep(1500);
+
     await logSettings({ page: CUSTOM_LOG_PAGE, beforeClose: () => shot('settings-log-page-named') });
     const mid = (await logLines()).length;
     await openAndClose();
@@ -204,7 +277,9 @@ async function main() {
   }
 }
 
-const LOG_PAGE = 'Sidebar Log', CUSTOM_LOG_PAGE = 'Persistent Sidebar CI log';
+const LOG_PAGE = 'Sidebar Log', CUSTOM_LOG_PAGE = 'Persistent Sidebar CI log', UNLOAD_LOG_PAGE = 'Persistent Sidebar CI unload log';
+const MARKUP_PAGES = ['Persistent Sidebar CI no such page', 'pscinosuchtag'];
+const MARKUP = `[[${MARKUP_PAGES[0]}]] #${MARKUP_PAGES[1]} {{[[TODO]]}}`;
 let logStart = 0;
 const logTree = (title) => evalIn((title) => {
   const page = window.roamAlphaAPI.data.pull('[{:block/children [:block/string :block/order {:block/children [:block/string :block/order]}]}]', [':node/title', title]);
@@ -219,7 +294,7 @@ let failure = '';
 try { await main(); } catch (e) { failure = e.message.split('\n')[0]; log('ERROR', e.stack ?? e.message); await shot('error'); }
 try { if (roam.page) await clearSidebar(); } catch { /* best effort */ }
 try {
-  if (roam.page && !PUBLIC) { await logSettings({ on: false, page: '' }); await deletePage(CUSTOM_LOG_PAGE); }
+  if (roam.page && !PUBLIC) { await logSettings({ on: false, page: '' }); await deletePage(CUSTOM_LOG_PAGE); await deletePage(UNLOAD_LOG_PAGE); }
 } catch { /* best effort */ }
 await quitRoam('SIGTERM').catch(() => {});
 stopServing();
