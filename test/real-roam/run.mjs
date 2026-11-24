@@ -153,6 +153,7 @@ async function main() {
   await start();
   const ok2 = await restored(second);
   const after2 = await sidebarNow();
+  log('raw windows after kill', JSON.stringify(await evalIn(() => window.roamAlphaAPI.ui.rightSidebar.getWindows())));
   check('After Roam is killed, the sidebar comes back as it was, and stays closed', ok2, describe(after2));
   await shot('after-kill-sidebar-closed');
   await sb('await sb.open();');
