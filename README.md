@@ -4,7 +4,7 @@
 
 Everything in your right sidebar comes back after you restart Roam.
 
-![Roam just after a restart, with the same three windows back in the right sidebar](https://raw.githubusercontent.com/sweenzor/roam-persistent-sidebar/81938b7e5655c37d6ee89a096538a669d5a4398a/docs/images/sidebar-restored.png)
+![Roam just after a restart, with the same three windows back in the right sidebar](https://raw.githubusercontent.com/sweenzor/roam-persistent-sidebar/0d9a725e4508e7586ff3536d2a3b34322d75b7c7/docs/images/sidebar-restored.png)
 
 </div>
 
@@ -26,7 +26,7 @@ To go back to Roam's normal sidebar, turn the extension off in **Settings → Ro
 
 ## What comes back
 
-![A restored sidebar with a pinned page, references to a page, a collapsed page, a block, a collapsed graph and a collapsed search](https://raw.githubusercontent.com/sweenzor/roam-persistent-sidebar/81938b7e5655c37d6ee89a096538a669d5a4398a/docs/images/window-kinds.png)
+![A restored sidebar with a pinned page, references to a page, a collapsed page, a block, a collapsed graph and a collapsed search](https://raw.githubusercontent.com/sweenzor/roam-persistent-sidebar/0d9a725e4508e7586ff3536d2a3b34322d75b7c7/docs/images/window-kinds.png)
 
 | | After a restart |
 | --- | --- |
@@ -46,7 +46,7 @@ The sidebar log is an optional record of everything you open in and close from t
 
 Turn it on in **Settings → Persistent Sidebar**:
 
-![The Persistent Sidebar settings tab, with the Sidebar log switch on and the Sidebar log page field](https://raw.githubusercontent.com/sweenzor/roam-persistent-sidebar/81938b7e5655c37d6ee89a096538a669d5a4398a/docs/images/settings.png)
+![The Persistent Sidebar settings tab, with the Sidebar log switch on and the Sidebar log page field](https://raw.githubusercontent.com/sweenzor/roam-persistent-sidebar/0d9a725e4508e7586ff3536d2a3b34322d75b7c7/docs/images/settings.png)
 
 | Setting | What it does | To start with |
 | --- | --- | --- |
@@ -58,7 +58,7 @@ Turn it on in **Settings → Persistent Sidebar**:
 Each day gets one block that links to that day's daily note. Under it there's one line for each window you
 opened or closed, with the time:
 
-![The Sidebar Log page: a block for the day, and under it one line for each window opened or closed](https://raw.githubusercontent.com/sweenzor/roam-persistent-sidebar/81938b7e5655c37d6ee89a096538a669d5a4398a/docs/images/sidebar-log.png)
+![The Sidebar Log page: a block for the day, and under it one line for each window opened or closed](https://raw.githubusercontent.com/sweenzor/roam-persistent-sidebar/0d9a725e4508e7586ff3536d2a3b34322d75b7c7/docs/images/sidebar-log.png)
 
 The lines are worded like the window headers in Roam's sidebar:
 
@@ -78,7 +78,7 @@ plain text there and link to nothing.
 The lines link to the pages and blocks themselves. So a page that has been in your sidebar lists those
 times in its **Linked References**, and each daily note lists what you had in the sidebar that day.
 
-![The page Alfama, with the Sidebar Log entry for when it was opened listed in its Linked References](https://raw.githubusercontent.com/sweenzor/roam-persistent-sidebar/81938b7e5655c37d6ee89a096538a669d5a4398a/docs/images/sidebar-log-linked-references.png)
+![The page Alfama, with the Sidebar Log entry for when it was opened listed in its Linked References](https://raw.githubusercontent.com/sweenzor/roam-persistent-sidebar/0d9a725e4508e7586ff3536d2a3b34322d75b7c7/docs/images/sidebar-log-linked-references.png)
 
 ## Privacy
 
