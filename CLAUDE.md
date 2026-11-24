@@ -28,11 +28,27 @@ that commit. A new feature needs a new picture in that script. Then bump `source
 - `src/log.js` sidebar log page writer.
 - `src/index.js` lifecycle, MutationObserver on body -> debounced compare and save, settings panel.
 
+## Rules from Roam's Depot review (#1552, 2026-11-24)
+
+- Restore never takes a window out of the sidebar: it adds what is missing and moves open windows with
+  `setWindowOrder`. Every call to Roam is tried on its own, and the save is only replaced after a restore
+  where every step worked (`restore()` returns `ok`); `index.js` tries up to three times.
+- Text the user typed (search queries) goes into the log as inline code (`plain()` in `src/log.js`), never
+  as Roam markup. A search closed and a search opened in the same change is one window being typed in,
+  and is not logged.
+- Unload (`stop` in `src/index.js`): a change still waiting out the 300 ms is saved, not logged; a running
+  restore stops at its next step; log lines still waiting are dropped; the IndexedDB connection is closed
+  after the last save, also one still opening (`src/store.js` keeps one open promise).
+
 ## Roam API notes
 
 - `addWindow` puts the window at the top and opens the sidebar. `getWindows` reports `page-uid` for
   outline/mentions/graph of a page, `mentions-uid` for mentions of a block, `search-query-str` for search;
   all are added back with `block-uid` (or `search-query-str`).
+- Roam brings its pinned windows back itself a moment after the graph opens (later than the extension's
+  own restore, measured in desktop 0.0.43). Adding a page or block that is open already changes nothing
+  (`window-id` is `sidebar-<type>-<uid>`), but every `addWindow` of a search makes a new window
+  (`sidebar-search-query-uuid…`). So a pinned search is left to Roam for 8 s (`PINNED_WAIT`) before it is added.
 - Sidebar open = `#roam-right-sidebar-content` exists. Windows survive `close()`.
 - In the public help graph nothing in the sidebar survives a restart, pinned or not.
 

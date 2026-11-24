@@ -6,6 +6,9 @@ import { changes, createLog, LOG_PAGE } from './log.js';
 
 const TAG = '[persistent-sidebar]';
 const SAVE_DELAY = 300;
+const RESTORE_TRIES = 3, RESTORE_RETRY_DELAY = 1000;
+// How long Roam gets to put a pinned search back itself before the extension adds it.
+const PINNED_WAIT = 8000, PINNED_POLL = 250;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const sidebarOpen = () => !!document.querySelector('#roam-right-sidebar-content');
 
@@ -21,27 +24,31 @@ async function start(extensionAPI) {
   const titleOf = (uid) => api.data.pull('[:node/title]', [':block/uid', uid])?.[':node/title'] ?? null;
 
   const current = () => ({ open: sidebarOpen(), windows: readWindows(api.ui.rightSidebar) });
-  const check = () => {
+  const save = (state) => store.save({ ...state, t: Date.now() });
+  const check = ({ quiet = false } = {}) => {
     timer = null;
-    if (stopped) return;
     let now;
     try { now = current(); } catch { return; }
     if (sameState(now, last)) return;
-    if (logging()) {
+    if (!quiet && logging()) {
       try { log.add(changes(last.windows, now.windows, titleOf)); } catch (e) { console.warn(TAG, 'could not log:', e?.message ?? e); }
     }
     last = now;
-    store.save({ ...now, t: Date.now() });
+    save(now);
   };
   const schedule = () => { if (!timer && !stopped) timer = setTimeout(check, SAVE_DELAY); };
   const flush = () => { if (timer) { clearTimeout(timer); check(); } };
 
   stop = () => {
-    stopped = true;
+    if (stopped) return;
     observer?.disconnect();
-    if (timer) clearTimeout(timer);
     window.removeEventListener('beforeunload', flush);
-    store.close();
+    // A change still waiting out the delay is saved now. It is not logged: nothing is written to the
+    // graph once the extension is unloaded, and log lines still waiting are dropped.
+    if (timer) { clearTimeout(timer); check({ quiet: true }); }
+    stopped = true;
+    log.stop();
+    store.close(); // after the save above is written; also closes a connection that is still opening
   };
 
   // Give Roam a moment to put back its own pinned windows first, so they are not added twice.
@@ -49,13 +56,29 @@ async function start(extensionAPI) {
   if (stopped) return;
   const saved = await store.load();
   if (stopped) return;
+  let restored = true;
   if (saved) {
-    try { await restore(api, saved); } catch (e) { console.warn(TAG, 'could not restore the sidebar:', e?.message ?? e); }
+    // Restore only does what is missing, so it is run again while Roam is still bringing back a pinned
+    // search, and after a step that failed (Roam not ready yet, say), three times at most.
+    const deadline = Date.now() + PINNED_WAIT;
+    for (let failures = 0; !stopped;) {
+      let result;
+      try { result = await restore(api, saved, { cancelled: () => stopped, addPinnedSearches: Date.now() >= deadline }); } catch (e) { result = { ok: false, failed: [{ step: 'restore', error: e?.message ?? String(e) }] }; }
+      restored = result.ok;
+      if (restored || stopped) break;
+      if (result.failed.length) {
+        console.warn(TAG, `could not restore the sidebar (try ${++failures} of ${RESTORE_TRIES}):`, result.failed.map((f) => `${f.step}${f.window ? ` ${f.window}` : ''}: ${f.error}`).join('; '));
+        if (failures >= RESTORE_TRIES) break;
+        await sleep(RESTORE_RETRY_DELAY);
+      } else await sleep(PINNED_POLL);
+    }
     await sleep(300);
   }
   if (stopped) return;
   last = current();
-  store.save({ ...last, t: Date.now() });
+  // Only a sidebar that came back whole replaces the save. After a restore that failed the old save
+  // stays as it is, for the next start, until the sidebar is next changed by hand.
+  if (restored) save(last);
 
   // Any change to the sidebar (a window opened, closed, moved, collapsed or pinned, or the sidebar
   // opened or closed) changes the page, so watch the page and compare after it settles.

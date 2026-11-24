@@ -6,3 +6,4 @@
   pinned, and whether the sidebar is open, and puts them back when Roam starts again.
 - Optional sidebar log: every window opened in or closed from the sidebar, with the time, under a block
   for the day that links to the daily note. Goes to the page Sidebar Log, or one you name in settings.
+  Search text is written as code, so it links to nothing.
